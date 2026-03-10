@@ -1,5 +1,14 @@
 <?php
 session_start();
+
+$settingsFile = __DIR__ . '/output/.project_settings.json';
+$hiddenProjects = [];
+if (file_exists($settingsFile)) {
+    $settingsData = json_decode(file_get_contents($settingsFile), true);
+    if (isset($settingsData['hidden']) && is_array($settingsData['hidden'])) {
+        $hiddenProjects = $settingsData['hidden'];
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -573,6 +582,118 @@ session_start();
         .toast.hiding {
             animation: slideOut 0.3s ease-out forwards;
         }
+
+        /* Sidebar Toolbar */
+        .sidebar-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 15px;
+            border-bottom: 1px solid #eee;
+            background: #f9f9f9;
+        }
+
+        .project-filter-input {
+            flex: 1;
+            padding: 7px 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 12px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .project-filter-input:focus {
+            border-color: #667eea;
+        }
+
+        .show-hidden-btn {
+            background: #f0f0f0;
+            color: #555;
+            border: 1px solid #ccc;
+            padding: 6px 10px;
+            border-radius: 5px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.2s, color 0.2s;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .show-hidden-btn:hover {
+            background: #e0e0e0;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .show-hidden-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        /* Folder hide/show buttons */
+        .folder-hide-btn {
+            display: none;
+            background: #f0ad4e;
+            margin-left: 4px;
+        }
+
+        .folder-show-btn {
+            display: none;
+            background: #5bc0de;
+            margin-left: 4px;
+        }
+
+        .directory-item.folder:hover .folder-hide-btn {
+            display: inline-block;
+        }
+
+        /* Hidden projects */
+        .directory-item.folder.project-hidden {
+            display: none;
+        }
+
+        .directory-item.folder.project-hidden + .folder-content {
+            display: none !important;
+        }
+
+        /* Show hidden mode */
+        .directory-tree.show-hidden .directory-item.folder.project-hidden {
+            display: flex;
+            opacity: 0.5;
+            background: #fff3cd;
+            border: 1px dashed #f0ad4e;
+        }
+
+        .directory-tree.show-hidden .directory-item.folder.project-hidden + .folder-content {
+            display: block !important;
+            opacity: 0.5;
+        }
+
+        .directory-tree.show-hidden .directory-item.folder.project-hidden:hover {
+            opacity: 0.8;
+        }
+
+        .directory-tree.show-hidden .directory-item.folder.project-hidden .folder-hide-btn {
+            display: none !important;
+        }
+
+        .directory-tree.show-hidden .directory-item.folder.project-hidden:hover .folder-show-btn {
+            display: inline-block;
+        }
+
+        /* No-match message */
+        .filter-no-match {
+            text-align: center;
+            padding: 20px;
+            color: #999;
+            font-style: italic;
+            font-size: 13px;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -616,9 +737,15 @@ session_start();
                 }
                 ?>
             </div>
+            <div class="sidebar-toolbar">
+                <input type="text" id="projectFilter" class="project-filter-input" placeholder="Filter projects..." oninput="filterProjects(this.value)">
+                <button type="button" id="showHiddenBtn" class="show-hidden-btn" onclick="toggleShowHidden()">Show Hidden</button>
+            </div>
+
             <div class="directory-tree" id="directoryTree">
+                <div class="filter-no-match" id="filterNoMatch">No projects match your filter.</div>
                 <?php
-                function scanDirectory($dir, $baseDir) {
+                function scanDirectory($dir, $baseDir, $hiddenProjects = []) {
                     if (!is_dir($dir)) {
                         echo '<div class="empty-directory">No files generated yet</div>';
                         return;
@@ -635,13 +762,18 @@ session_start();
 
                         if (is_dir($fullPath)) {
                             $hasContent = true;
-                            echo '<div class="directory-item folder">';
+                            $isHidden = in_array($item, $hiddenProjects);
+                            $hiddenClass = $isHidden ? ' project-hidden' : '';
+                            $hiddenAttr = $isHidden ? 'true' : 'false';
+                            echo '<div class="directory-item folder' . $hiddenClass . '" data-folder-name="' . htmlspecialchars(strtolower($item)) . '" data-hidden="' . $hiddenAttr . '">';
                             echo '<input type="checkbox" class="folder-checkbox" onclick="event.stopPropagation(); toggleFolderFiles(this);" style="margin-right: 8px;">';
                             echo '<span class="folder-name" onclick="toggleFolder(this.closest(\'.directory-item.folder\'))">' . htmlspecialchars($item) . '</span>';
+                            echo '<button class="file-action-btn folder-hide-btn" onclick="event.stopPropagation(); hideProject(\'' . htmlspecialchars($item, ENT_QUOTES) . '\')">Hide</button>';
+                            echo '<button class="file-action-btn folder-show-btn" onclick="event.stopPropagation(); unhideProject(\'' . htmlspecialchars($item, ENT_QUOTES) . '\')">Show</button>';
                             echo '<button class="file-action-btn btn-remove folder-delete-btn" onclick="event.stopPropagation(); deleteFolder(\'' . htmlspecialchars('output/' . $relativePath) . '\')">Delete</button>';
                             echo '</div>';
                             echo '<div class="folder-content" style="padding-left: 20px;">';
-                            scanDirectory($fullPath, $baseDir);
+                            scanDirectory($fullPath, $baseDir, $hiddenProjects);
                             echo '</div>';
                         } elseif (pathinfo($item, PATHINFO_EXTENSION) === 'docx') {
                             $hasContent = true;
@@ -675,7 +807,7 @@ session_start();
                 }
 
                 $outputDir = __DIR__ . '/output';
-                scanDirectory($outputDir, $outputDir);
+                scanDirectory($outputDir, $outputDir, $hiddenProjects);
                 ?>
             </div>
             <div class="bulk-actions">
@@ -1004,6 +1136,122 @@ session_start();
                 statusData.remove();
             }
         });
+
+        // ── Project Filter ──────────────────────────────────────────────
+        function filterProjects(query) {
+            const tree = document.getElementById('directoryTree');
+            const folders = tree.querySelectorAll(':scope > .directory-item.folder');
+            const noMatch = document.getElementById('filterNoMatch');
+            const q = query.trim().toLowerCase();
+            let visibleCount = 0;
+
+            folders.forEach(folder => {
+                const name = folder.dataset.folderName || '';
+                const isHidden = folder.dataset.hidden === 'true';
+                const showingHidden = tree.classList.contains('show-hidden');
+
+                // Skip hidden projects unless in show-hidden mode
+                if (isHidden && !showingHidden) return;
+
+                const content = folder.nextElementSibling; // folder-content div
+                if (!q || name.includes(q)) {
+                    folder.style.display = '';
+                    if (content && content.classList.contains('folder-content') && !isHidden) {
+                        content.style.display = '';
+                    }
+                    visibleCount++;
+                } else {
+                    folder.style.display = 'none';
+                    if (content && content.classList.contains('folder-content')) {
+                        content.style.display = 'none';
+                    }
+                }
+            });
+
+            noMatch.style.display = (visibleCount === 0 && q) ? 'block' : 'none';
+        }
+
+        // ── Show / Hide Hidden Projects ─────────────────────────────────
+        let showingHidden = false;
+
+        function toggleShowHidden() {
+            showingHidden = !showingHidden;
+            const tree = document.getElementById('directoryTree');
+            const btn = document.getElementById('showHiddenBtn');
+            tree.classList.toggle('show-hidden', showingHidden);
+            btn.classList.toggle('active', showingHidden);
+            btn.textContent = showingHidden ? 'Hide Hidden' : 'Show Hidden';
+            // Re-apply any active filter
+            const filterVal = document.getElementById('projectFilter').value;
+            if (filterVal) filterProjects(filterVal);
+        }
+
+        function hideProject(folderName) {
+            fetch('project_settings.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'hide_project', project: folderName })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    const folder = findFolderElement(folderName);
+                    if (folder) {
+                        folder.classList.add('project-hidden');
+                        folder.dataset.hidden = 'true';
+                        // Hide its content too unless show-hidden is active
+                        if (!showingHidden) {
+                            const content = folder.nextElementSibling;
+                            if (content && content.classList.contains('folder-content')) {
+                                content.style.display = 'none';
+                            }
+                        }
+                    }
+                    showToast('success', `Project "${folderName}" hidden`);
+                } else {
+                    showToast('error', 'Failed to hide project');
+                }
+            })
+            .catch(() => showToast('error', 'Error hiding project'));
+        }
+
+        function unhideProject(folderName) {
+            fetch('project_settings.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'show_project', project: folderName })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    const folder = findFolderElement(folderName);
+                    if (folder) {
+                        folder.classList.remove('project-hidden');
+                        folder.dataset.hidden = 'false';
+                        folder.style.display = '';
+                        const content = folder.nextElementSibling;
+                        if (content && content.classList.contains('folder-content')) {
+                            content.style.display = '';
+                        }
+                    }
+                    showToast('success', `Project "${folderName}" is now visible`);
+                } else {
+                    showToast('error', 'Failed to show project');
+                }
+            })
+            .catch(() => showToast('error', 'Error showing project'));
+        }
+
+        function findFolderElement(folderName) {
+            const tree = document.getElementById('directoryTree');
+            const folders = tree.querySelectorAll('.directory-item.folder');
+            for (const f of folders) {
+                // Match case-insensitively against the folder-name span text
+                const nameSpan = f.querySelector('.folder-name');
+                if (nameSpan && nameSpan.textContent.trim() === folderName) return f;
+            }
+            return null;
+        }
 
         // Auto-refresh directory tree every 5 seconds during processing
         document.getElementById('generatorForm').addEventListener('submit', function() {
