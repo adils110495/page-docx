@@ -4,7 +4,6 @@ require_once 'vendor/autoload.php';
 
 use PhpOffice\PhpWord\PhpWord;
 use PhpOffice\PhpWord\IOFactory;
-use PhpOffice\PhpWord\Shared\Html;
 
 /**
  * Generate slug from URL for filename
@@ -299,11 +298,11 @@ function processNodeForDocx($section, $node, $textRun = null, $depth = 0) {
             // Only add text if it's not just whitespace
             if (!empty($trimmedValue)) {
                 if ($textRun) {
-                    $textRun->addText($nodeValue);
+                    $textRun->addText(sanitizeTextForDocx($nodeValue));
                 } else {
                     // Direct text without parent formatting element - only add if substantial
                     if (strlen($trimmedValue) > 2) {
-                        $section->addText($trimmedValue, ['size' => 11, 'name' => 'Arial']);
+                        $section->addText(sanitizeTextForDocx($trimmedValue), ['size' => 11, 'name' => 'Arial']);
                     }
                 }
             }
@@ -506,6 +505,29 @@ function processNodeForDocx($section, $node, $textRun = null, $depth = 0) {
                     }
                     break;
 
+                case 'a':
+                    $href = $child->hasAttribute('href') ? trim($child->getAttribute('href')) : '';
+                    $linkText = sanitizeTextForDocx(getTextContent($child));
+                    if (!empty($href) && !empty($linkText) && preg_match('/^https?:\/\//i', $href)) {
+                        $linkStyle = ['color' => '0563C1', 'underline' => 'single', 'size' => 11, 'name' => 'Arial'];
+                        try {
+                            if ($textRun) {
+                                $textRun->addLink($href, $linkText, $linkStyle, null, true);
+                            } else {
+                                $section->addLink($href, $linkText, $linkStyle, ['spaceAfter' => 100], true);
+                            }
+                        } catch (Exception $_e) {
+                            if ($textRun) {
+                                $textRun->addText($linkText, ['size' => 11, 'name' => 'Arial']);
+                            } else {
+                                $section->addText($linkText, ['size' => 11, 'name' => 'Arial']);
+                            }
+                        }
+                    } elseif ($child->hasChildNodes()) {
+                        processNodeForDocx($section, $child, $textRun, $depth + 1);
+                    }
+                    break;
+
                 default:
                     // For other elements, just extract text content
                     if ($child->hasChildNodes()) {
@@ -640,18 +662,18 @@ function processTableForDocx($section, $tableNode) {
 
     // Process table rows
     $isFirstRow = true;
-    foreach ($tableNode->childNodes as $section) {
-        $sectionName = strtolower($section->nodeName);
+    foreach ($tableNode->childNodes as $tableSection) {
+        $tableSectionName = strtolower($tableSection->nodeName);
 
-        if ($sectionName === 'thead' || $sectionName === 'tbody' || $sectionName === 'tfoot') {
-            foreach ($section->childNodes as $row) {
+        if ($tableSectionName === 'thead' || $tableSectionName === 'tbody' || $tableSectionName === 'tfoot') {
+            foreach ($tableSection->childNodes as $row) {
                 if (strtolower($row->nodeName) === 'tr') {
                     processTableRow($table, $row, $isFirstRow);
                     $isFirstRow = false;
                 }
             }
-        } elseif ($sectionName === 'tr') {
-            processTableRow($table, $section, $isFirstRow);
+        } elseif ($tableSectionName === 'tr') {
+            processTableRow($table, $tableSection, $isFirstRow);
             $isFirstRow = false;
         }
     }
@@ -874,8 +896,18 @@ function processInlineContent($textRun, $node, $fontStyle = []) {
                     processInlineContent($textRun, $child, $underlineStyle);
                     break;
                 case 'a':
-                    // Handle links - just extract text
-                    processInlineContent($textRun, $child, $fontStyle);
+                    $href = $child->hasAttribute('href') ? trim($child->getAttribute('href')) : '';
+                    $linkText = sanitizeTextForDocx(getTextContent($child));
+                    if (!empty($href) && !empty($linkText) && preg_match('/^https?:\/\//i', $href)) {
+                        $linkStyle = array_merge($fontStyle, ['color' => '0563C1', 'underline' => 'single']);
+                        try {
+                            $textRun->addLink($href, $linkText, $linkStyle, null, true);
+                        } catch (Exception $_e) {
+                            $textRun->addText($linkText, $fontStyle);
+                        }
+                    } else {
+                        processInlineContent($textRun, $child, $fontStyle);
+                    }
                     break;
                 case 'span':
                 case 'sup':
@@ -903,17 +935,15 @@ function addElementContent($section, $node, $fontStyle = [], $paragraphStyle = [
             // No <br> tags, use simple text extraction
             $text = getTextContent($node);
             if (!empty($text)) {
-                $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $text = sanitizeTextForDocx($text);
                 $section->addText($text, $fontStyle, $paragraphStyle);
             }
         }
-    } catch (Exception $e) {
+    } catch (Exception $_e) {
         // Fallback to simple text if TextRun fails
         $text = getTextContent($node);
         if (!empty($text)) {
-            $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            // Replace newlines with spaces for fallback
-            $text = preg_replace('/\s+/', ' ', $text);
+            $text = sanitizeTextForDocx($text);
             $section->addText($text, $fontStyle, $paragraphStyle);
         }
     }
@@ -979,8 +1009,11 @@ function generateDocx($content, $filename, $project = null) {
         // Convert HTML to formatted text for DOCX
         // PHPWord's HTML parser has limitations, so we'll extract and format text properly
         $dom = new DOMDocument();
+        $dom->encoding = 'UTF-8';
         libxml_use_internal_errors(true);
-        $dom->loadHTML(mb_convert_encoding($cleanHtml, 'HTML-ENTITIES', 'UTF-8'));
+        // Prepend charset meta so DOMDocument treats the bytes as UTF-8,
+        // avoiding the deprecated mb_convert_encoding('HTML-ENTITIES') call.
+        $dom->loadHTML('<?xml encoding="UTF-8"><meta charset="UTF-8">' . $cleanHtml);
         libxml_clear_errors();
 
         // Process the DOM and add content with formatting
@@ -1024,6 +1057,30 @@ function generateDocx($content, $filename, $project = null) {
     $objWriter = IOFactory::createWriter($phpWord, 'Word2007');
     $objWriter->save($filepath);
 
+    // Validate the generated DOCX by checking its XML is well-formed
+    if (class_exists('ZipArchive')) {
+        $zip = new ZipArchive();
+        if ($zip->open($filepath) === true) {
+            $xmlFiles = ['word/document.xml', 'word/_rels/document.xml.rels', '[Content_Types].xml'];
+            foreach ($xmlFiles as $xmlFile) {
+                $xml = $zip->getFromName($xmlFile);
+                if ($xml !== false) {
+                    $testDom = new DOMDocument();
+                    libxml_use_internal_errors(true);
+                    if (!$testDom->loadXML($xml)) {
+                        $xmlErrors = libxml_get_errors();
+                        foreach ($xmlErrors as $xmlError) {
+                            debugLog("  [DOCX VALIDATION ERROR] {$xmlFile} — " . trim($xmlError->message) . " (line {$xmlError->line}, col {$xmlError->column})");
+                        }
+                        libxml_clear_errors();
+                    }
+                    libxml_clear_errors();
+                }
+            }
+            $zip->close();
+        }
+    }
+
     // Restore error reporting
     error_reporting($oldErrorReporting);
 
@@ -1063,16 +1120,16 @@ function cleanHtmlForDocx($html) {
     $html = preg_replace('/<noscript\b[^>]*>(.*?)<\/noscript>/is', '', $html);
     $html = preg_replace('/<iframe\b[^>]*>(.*?)<\/iframe>/is', '', $html);
 
-    // Remove empty tags that can cause issues, but preserve heading tags
-    // First, temporarily mark headings to protect them
-    $html = preg_replace('/<(h[1-6])\b([^>]*)>\s*<\/\1>/', '<$1$2>__PRESERVE__</$1>', $html);
-    // Remove other empty tags
-    $html = preg_replace('/<(\w+)[^>]*>\s*<\/\1>/', '', $html);
-    // Restore preserved headings (they'll be extracted later even if empty)
-    $html = str_replace('__PRESERVE__', '', $html);
+    // Remove empty non-structural tags only.
+    // Structural tags (table cells, rows, list items, headings) must be preserved
+    // even when empty — removing them breaks table/list XML structure.
+    $preserveTags = 'td|th|tr|li|h1|h2|h3|h4|h5|h6';
+    $html = preg_replace('/<(?!' . $preserveTags . ')(\w+)[^>]*>\s*<\/\1>/', '', $html);
 
-    // Convert common HTML entities
-    $html = html_entity_decode($html, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    // Do NOT call html_entity_decode() here. The HTML arriving from getInnerHtml()
+    // already has properly escaped entities (e.g. &amp;). Decoding them produces
+    // raw & < > characters that DOMDocument re-parses incorrectly and can write
+    // invalid XML into the DOCX.
 
     // Trim whitespace
     $html = trim($html);
@@ -1165,7 +1222,7 @@ function processUrl($url, $selector, $project = null, $skipSelectors = '') {
             'url' => $url,
             'file' => $relativeFilepath
         ];
-    } catch (Exception $e) {
+    } catch (Exception $_e) {
         return [
             'type' => 'error',
             'message' => 'Failed to generate DOCX: ' . $e->getMessage(),
