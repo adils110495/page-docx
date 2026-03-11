@@ -1,5 +1,14 @@
 <?php
 session_start();
+
+$settingsFile = __DIR__ . '/output/.project_settings.json';
+$hiddenProjects = [];
+if (file_exists($settingsFile)) {
+    $settingsData = json_decode(file_get_contents($settingsFile), true);
+    if (isset($settingsData['hidden']) && is_array($settingsData['hidden'])) {
+        $hiddenProjects = $settingsData['hidden'];
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -693,7 +702,6 @@ session_start();
             font-size: 13px;
             display: none;
         }
-
     </style>
 </head>
 <body>
@@ -737,7 +745,6 @@ session_start();
                 }
                 ?>
             </div>
-<<<<<<< HEAD
             <div class="sidebar-toolbar">
                 <div class="toolbar-row">
                     <input type="text" id="projectFilter" class="project-filter-input" placeholder="Filter projects..." oninput="filterProjects(this.value)">
@@ -751,11 +758,8 @@ session_start();
             <div class="directory-tree" id="directoryTree">
                 <div class="filter-no-match" id="filterNoMatch">No projects match your filter.</div>
                 <div class="filter-no-match" id="filterFilesNoMatch">No files match your filter.</div>
-=======
-            <div class="directory-tree" id="directoryTree">
->>>>>>> parent of 73f9c30 (update)
                 <?php
-                function scanDirectory($dir, $baseDir) {
+                function scanDirectory($dir, $baseDir, $hiddenProjects = []) {
                     if (!is_dir($dir)) {
                         echo '<div class="empty-directory">No files generated yet</div>';
                         return;
@@ -772,13 +776,18 @@ session_start();
 
                         if (is_dir($fullPath)) {
                             $hasContent = true;
-                            echo '<div class="directory-item folder">';
+                            $isHidden = in_array($item, $hiddenProjects);
+                            $hiddenClass = $isHidden ? ' project-hidden' : '';
+                            $hiddenAttr = $isHidden ? 'true' : 'false';
+                            echo '<div class="directory-item folder' . $hiddenClass . '" data-folder-name="' . htmlspecialchars(strtolower($item)) . '" data-hidden="' . $hiddenAttr . '">';
                             echo '<input type="checkbox" class="folder-checkbox" onclick="event.stopPropagation(); toggleFolderFiles(this);" style="margin-right: 8px;">';
                             echo '<span class="folder-name" onclick="toggleFolder(this.closest(\'.directory-item.folder\'))">' . htmlspecialchars($item) . '</span>';
+                            echo '<button class="file-action-btn folder-hide-btn" onclick="event.stopPropagation(); hideProject(\'' . htmlspecialchars($item, ENT_QUOTES) . '\')">Hide</button>';
+                            echo '<button class="file-action-btn folder-show-btn" onclick="event.stopPropagation(); unhideProject(\'' . htmlspecialchars($item, ENT_QUOTES) . '\')">Show</button>';
                             echo '<button class="file-action-btn btn-remove folder-delete-btn" onclick="event.stopPropagation(); deleteFolder(\'' . htmlspecialchars('output/' . $relativePath) . '\')">Delete</button>';
                             echo '</div>';
                             echo '<div class="folder-content" style="padding-left: 20px;">';
-                            scanDirectory($fullPath, $baseDir);
+                            scanDirectory($fullPath, $baseDir, $hiddenProjects);
                             echo '</div>';
                         } elseif (pathinfo($item, PATHINFO_EXTENSION) === 'docx') {
                             $hasContent = true;
@@ -812,7 +821,7 @@ session_start();
                 }
 
                 $outputDir = __DIR__ . '/output';
-                scanDirectory($outputDir, $outputDir);
+                scanDirectory($outputDir, $outputDir, $hiddenProjects);
                 ?>
             </div>
             <div class="bulk-actions">
@@ -1142,7 +1151,6 @@ session_start();
             }
         });
 
-<<<<<<< HEAD
         // ── Project Filter ──────────────────────────────────────────────
         function filterProjects(query) {
             const tree = document.getElementById('directoryTree');
@@ -1310,8 +1318,6 @@ session_start();
             return null;
         }
 
-=======
->>>>>>> parent of 73f9c30 (update)
         // Auto-refresh directory tree every 5 seconds during processing
         document.getElementById('generatorForm').addEventListener('submit', function() {
             document.getElementById('submitBtn').disabled = true;

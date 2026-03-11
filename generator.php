@@ -218,11 +218,11 @@ function extractContent($html, $selector = null, $skipSelectors = '') {
     $contentHtml = '';
 
     if ($selector && !empty(trim($selector))) {
-        // Try to find div with specific class
-        $nodes = $xpath->query("//div[contains(concat(' ', normalize-space(@class), ' '), ' $selector ')]");
+        // Try to find any element with specific class
+        $nodes = $xpath->query("//*[contains(concat(' ', normalize-space(@class), ' '), ' $selector ')]");
 
         if ($nodes->length > 0) {
-            // Get inner HTML of the first matching div
+            // Get inner HTML of the first matching element
             $node = $nodes->item(0);
             $contentHtml = getInnerHtml($node);
         } else {
