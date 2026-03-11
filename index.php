@@ -1,5 +1,13 @@
 <?php
 session_start();
+
+// Load hidden project settings
+$settingsFile = __DIR__ . '/output/.settings.json';
+$hiddenProjects = [];
+if (file_exists($settingsFile)) {
+    $settings = json_decode(file_get_contents($settingsFile), true) ?? [];
+    $hiddenProjects = $settings['hidden_projects'] ?? [];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -573,6 +581,73 @@ session_start();
         .toast.hiding {
             animation: slideOut 0.3s ease-out forwards;
         }
+
+        /* Filter Bar */
+        .filter-bar {
+            padding: 10px 15px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-shrink: 0;
+            background: #fafafa;
+        }
+
+        .filter-bar input[type="text"] {
+            flex: 1;
+            padding: 6px 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 12px;
+            width: auto;
+            margin-bottom: 0;
+        }
+
+        .filter-bar input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .show-hidden-label {
+            font-size: 12px;
+            color: #666;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+            cursor: pointer;
+            font-weight: normal;
+            margin-bottom: 0;
+        }
+
+        .show-hidden-label input[type="checkbox"] {
+            cursor: pointer;
+            width: auto;
+            height: auto;
+            margin: 0;
+        }
+
+        /* Folder hide button */
+        .folder-hide-btn {
+            display: none;
+            background: #6c757d !important;
+            margin-left: 5px;
+        }
+
+        .directory-item.folder:hover .folder-hide-btn {
+            display: inline-block;
+        }
+
+        .directory-item.folder.is-hidden-project {
+            opacity: 0.55;
+            border-left: 3px solid #aaa;
+            padding-left: 7px;
+        }
+
+        .directory-item.folder.is-hidden-project .folder-hide-btn {
+            display: inline-block;
+            background: #28a745 !important;
+        }
     </style>
 </head>
 <body>
@@ -616,9 +691,15 @@ session_start();
                 }
                 ?>
             </div>
+            <div class="filter-bar">
+                <input type="text" id="filterInput" placeholder="Filter projects and files..." oninput="applyFilter()">
+                <label class="show-hidden-label">
+                    <input type="checkbox" id="showHidden" onchange="applyFilter()"> Show hidden
+                </label>
+            </div>
             <div class="directory-tree" id="directoryTree">
                 <?php
-                function scanDirectory($dir, $baseDir) {
+                function scanDirectory($dir, $baseDir, $hiddenProjects = []) {
                     if (!is_dir($dir)) {
                         echo '<div class="empty-directory">No files generated yet</div>';
                         return;
@@ -635,13 +716,15 @@ session_start();
 
                         if (is_dir($fullPath)) {
                             $hasContent = true;
-                            echo '<div class="directory-item folder">';
+                            $isHiddenAttr = in_array($item, $hiddenProjects) ? 'true' : 'false';
+                            echo '<div class="directory-item folder" data-project="' . htmlspecialchars($item) . '" data-hidden="' . $isHiddenAttr . '">';
                             echo '<input type="checkbox" class="folder-checkbox" onclick="event.stopPropagation(); toggleFolderFiles(this);" style="margin-right: 8px;">';
                             echo '<span class="folder-name" onclick="toggleFolder(this.closest(\'.directory-item.folder\'))">' . htmlspecialchars($item) . '</span>';
+                            echo '<button class="file-action-btn btn-hide folder-hide-btn" onclick="event.stopPropagation(); toggleHideProject(this, \'' . htmlspecialchars(addslashes($item)) . '\')">Hide</button>';
                             echo '<button class="file-action-btn btn-remove folder-delete-btn" onclick="event.stopPropagation(); deleteFolder(\'' . htmlspecialchars('output/' . $relativePath) . '\')">Delete</button>';
                             echo '</div>';
                             echo '<div class="folder-content" style="padding-left: 20px;">';
-                            scanDirectory($fullPath, $baseDir);
+                            scanDirectory($fullPath, $baseDir, $hiddenProjects);
                             echo '</div>';
                         } elseif (pathinfo($item, PATHINFO_EXTENSION) === 'docx') {
                             $hasContent = true;
@@ -675,7 +758,7 @@ session_start();
                 }
 
                 $outputDir = __DIR__ . '/output';
-                scanDirectory($outputDir, $outputDir);
+                scanDirectory($outputDir, $outputDir, $hiddenProjects);
                 ?>
             </div>
             <div class="bulk-actions">
@@ -774,6 +857,108 @@ session_start();
     </div>
 
     <script>
+        // Hidden projects state (loaded from PHP)
+        let hiddenProjects = <?php echo json_encode($hiddenProjects); ?>;
+
+        function toggleHideProject(button, projectName) {
+            const folderItem = button.closest('.directory-item.folder');
+            const isCurrentlyHidden = folderItem.dataset.hidden === 'true';
+
+            if (isCurrentlyHidden) {
+                hiddenProjects = hiddenProjects.filter(p => p !== projectName);
+                folderItem.dataset.hidden = 'false';
+            } else {
+                if (!hiddenProjects.includes(projectName)) {
+                    hiddenProjects.push(projectName);
+                }
+                folderItem.dataset.hidden = 'true';
+            }
+
+            saveSettings();
+            applyFilter();
+        }
+
+        function saveSettings() {
+            fetch('settings.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'save_settings', hidden_projects: hiddenProjects })
+            }).catch(() => {});
+        }
+
+        function applyFilter() {
+            const filter = document.getElementById('filterInput').value.toLowerCase().trim();
+            const showHidden = document.getElementById('showHidden').checked;
+
+            const folderItems = document.querySelectorAll('#directoryTree .directory-item.folder');
+
+            folderItems.forEach(folder => {
+                const folderContent = folder.nextElementSibling;
+                const hasFolderContent = folderContent && folderContent.classList.contains('folder-content');
+                const isHidden = folder.dataset.hidden === 'true';
+                const projectName = (folder.dataset.project || '').toLowerCase();
+
+                // Update hide button text and color
+                const hideBtn = folder.querySelector('.folder-hide-btn');
+                if (hideBtn) {
+                    hideBtn.textContent = isHidden ? 'Unhide' : 'Hide';
+                }
+
+                // Update hidden indicator class
+                if (isHidden && showHidden) {
+                    folder.classList.add('is-hidden-project');
+                } else {
+                    folder.classList.remove('is-hidden-project');
+                }
+
+                // Apply hidden visibility
+                if (isHidden && !showHidden) {
+                    folder.style.display = 'none';
+                    if (hasFolderContent) folderContent.style.display = 'none';
+                    return;
+                }
+
+                // Apply text filter
+                if (filter) {
+                    const folderMatches = projectName.includes(filter);
+                    let hasMatchingFiles = false;
+
+                    if (hasFolderContent) {
+                        const fileItems = folderContent.querySelectorAll('.directory-item.file');
+                        fileItems.forEach(fileItem => {
+                            const fileName = (fileItem.querySelector('.filename')?.textContent || '').toLowerCase();
+                            const fileMatches = folderMatches || fileName.includes(filter);
+                            fileItem.style.display = fileMatches ? '' : 'none';
+                            if (fileName.includes(filter)) hasMatchingFiles = true;
+                        });
+                    }
+
+                    const show = folderMatches || hasMatchingFiles;
+                    folder.style.display = show ? '' : 'none';
+                    if (hasFolderContent) {
+                        folderContent.style.display = show ? 'block' : 'none';
+                    }
+                } else {
+                    folder.style.display = '';
+                    if (hasFolderContent) {
+                        const fileItems = folderContent.querySelectorAll('.directory-item.file');
+                        fileItems.forEach(fi => fi.style.display = '');
+                    }
+                }
+            });
+
+            // Filter root-level files (not inside any folder)
+            const treeChildren = document.querySelectorAll('#directoryTree > .directory-item.file');
+            treeChildren.forEach(fileItem => {
+                if (filter) {
+                    const fileName = (fileItem.querySelector('.filename')?.textContent || '').toLowerCase();
+                    fileItem.style.display = fileName.includes(filter) ? '' : 'none';
+                } else {
+                    fileItem.style.display = '';
+                }
+            });
+        }
+
         function toggleFolder(element) {
             const folderContent = element.nextElementSibling;
             if (folderContent && folderContent.classList.contains('folder-content')) {
@@ -907,12 +1092,15 @@ session_start();
             });
         }
 
-        // Add event listeners to checkboxes
+        // Add event listeners to checkboxes and apply initial filter state
         document.addEventListener('DOMContentLoaded', function() {
             const checkboxes = document.querySelectorAll('.file-checkbox');
             checkboxes.forEach(cb => {
                 cb.addEventListener('change', updateBulkActionButtons);
             });
+
+            // Apply initial state (hide hidden projects, update button labels)
+            applyFilter();
         });
 
         // Toast Notification System
