@@ -582,6 +582,47 @@ if (file_exists($settingsFile)) {
             animation: slideOut 0.3s ease-out forwards;
         }
 
+        /* Project mode toggle */
+        .project-mode-toggle {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 8px;
+        }
+
+        .project-mode-option {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 13px;
+            font-weight: normal;
+            color: #444;
+            cursor: pointer;
+            margin-bottom: 0;
+        }
+
+        .project-mode-option input[type="radio"] {
+            width: auto;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 13px;
+            transition: border-color 0.3s;
+            box-sizing: border-box;
+            background: white;
+            cursor: pointer;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
         /* Filter Bar */
         .filter-bar {
             padding: 10px 15px;
@@ -772,16 +813,48 @@ if (file_exists($settingsFile)) {
         <div class="content-area">
             <form method="POST" action="generator.php" id="generatorForm">
                 <div class="form-group">
-                    <label for="project">Project Name (Optional)</label>
-                    <input
-                        type="text"
-                        name="project"
-                        id="project"
-                        placeholder="skycop-fr"
-                    />
+                    <label>Project (Optional)</label>
+                    <div class="project-mode-toggle">
+                        <label class="project-mode-option">
+                            <input type="radio" name="project_mode" value="new" onchange="switchProjectMode('new')"> New project
+                        </label>
+                        <label class="project-mode-option">
+                            <input type="radio" name="project_mode" value="existing" checked onchange="switchProjectMode('existing')"> Existing project
+                        </label>
+                    </div>
+                    <div id="projectNewInput" style="display:none;">
+                        <input
+                            type="text"
+                            id="projectName"
+                            placeholder="skycop-fr"
+                        />
+                    </div>
+                    <div id="projectExistingInput">
+                        <?php
+                        $outputDir = __DIR__ . '/output';
+                        $existingProjects = [];
+                        if (is_dir($outputDir)) {
+                            foreach (scandir($outputDir) as $item) {
+                                if ($item === '.' || $item === '..') continue;
+                                if (is_dir($outputDir . '/' . $item)) {
+                                    $existingProjects[] = $item;
+                                }
+                            }
+                        }
+                        ?>
+                        <?php if (!empty($existingProjects)): ?>
+                        <select name="project" id="projectSelect">
+                            <option value="">— None (root output) —</option>
+                            <?php foreach ($existingProjects as $proj): ?>
+                            <option value="<?php echo htmlspecialchars($proj); ?>"><?php echo htmlspecialchars($proj); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <?php else: ?>
+                        <div class="help-text" style="padding: 8px 0;">No existing projects found. Use "New project" to create one.</div>
+                        <?php endif; ?>
+                    </div>
                     <div class="help-text">
-                        Enter a project name to organize files in a dedicated folder (e.g., "skycop-fr").
-                        If empty, files will be saved in the root output directory.
+                        Organize generated files in a named subfolder. If empty or none selected, files go to the root output directory.
                     </div>
                 </div>
 
@@ -857,6 +930,25 @@ if (file_exists($settingsFile)) {
     </div>
 
     <script>
+        function switchProjectMode(mode) {
+            const newInput = document.getElementById('projectNewInput');
+            const existingInput = document.getElementById('projectExistingInput');
+            const nameField = document.getElementById('projectName');
+            const selectField = document.getElementById('projectSelect');
+
+            if (mode === 'existing') {
+                newInput.style.display = 'none';
+                existingInput.style.display = '';
+                if (nameField) nameField.removeAttribute('name');
+                if (selectField) selectField.setAttribute('name', 'project');
+            } else {
+                newInput.style.display = '';
+                existingInput.style.display = 'none';
+                if (nameField) nameField.setAttribute('name', 'project');
+                if (selectField) selectField.removeAttribute('name');
+            }
+        }
+
         // Hidden projects state (loaded from PHP)
         let hiddenProjects = <?php echo json_encode($hiddenProjects); ?>;
 
