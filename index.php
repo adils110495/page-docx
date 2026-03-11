@@ -586,19 +586,11 @@ if (file_exists($settingsFile)) {
         /* Sidebar Toolbar */
         .sidebar-toolbar {
             display: flex;
-            flex-wrap: wrap;
             align-items: center;
             gap: 8px;
             padding: 10px 15px;
             border-bottom: 1px solid #eee;
             background: #f9f9f9;
-        }
-
-        .toolbar-row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            width: 100%;
         }
 
         .project-filter-input {
@@ -746,18 +738,12 @@ if (file_exists($settingsFile)) {
                 ?>
             </div>
             <div class="sidebar-toolbar">
-                <div class="toolbar-row">
-                    <input type="text" id="projectFilter" class="project-filter-input" placeholder="Filter projects..." oninput="filterProjects(this.value)">
-                    <button type="button" id="showHiddenBtn" class="show-hidden-btn" onclick="toggleShowHidden()">Show Hidden</button>
-                </div>
-                <div class="toolbar-row">
-                    <input type="text" id="fileFilter" class="project-filter-input" placeholder="Filter files..." oninput="filterFiles(this.value)">
-                </div>
+                <input type="text" id="projectFilter" class="project-filter-input" placeholder="Filter projects..." oninput="filterProjects(this.value)">
+                <button type="button" id="showHiddenBtn" class="show-hidden-btn" onclick="toggleShowHidden()">Show Hidden</button>
             </div>
 
             <div class="directory-tree" id="directoryTree">
                 <div class="filter-no-match" id="filterNoMatch">No projects match your filter.</div>
-                <div class="filter-no-match" id="filterFilesNoMatch">No files match your filter.</div>
                 <?php
                 function scanDirectory($dir, $baseDir, $hiddenProjects = []) {
                     if (!is_dir($dir)) {
@@ -791,7 +777,7 @@ if (file_exists($settingsFile)) {
                             echo '</div>';
                         } elseif (pathinfo($item, PATHINFO_EXTENSION) === 'docx') {
                             $hasContent = true;
-                            echo '<div class="directory-item file" data-file-name="' . htmlspecialchars(strtolower($item)) . '">';
+                            echo '<div class="directory-item file">';
                             echo '<div class="file-info">';
                             echo '<input type="checkbox" class="file-checkbox" data-file="' . htmlspecialchars('output/' . $relativePath) . '">';
                             echo '<span class="filename">' . htmlspecialchars($item) . '</span>';
@@ -803,7 +789,7 @@ if (file_exists($settingsFile)) {
                             echo '</div>';
                         } elseif (pathinfo($item, PATHINFO_EXTENSION) === 'log') {
                             $hasContent = true;
-                            echo '<div class="directory-item file log" data-file-name="' . htmlspecialchars(strtolower($item)) . '">';
+                            echo '<div class="directory-item file log">';
                             echo '<div class="file-info">';
                             echo '<span class="filename">' . htmlspecialchars($item) . '</span>';
                             echo '</div>';
@@ -1185,55 +1171,6 @@ if (file_exists($settingsFile)) {
             noMatch.style.display = (visibleCount === 0 && q) ? 'block' : 'none';
         }
 
-        // ── File Filter ─────────────────────────────────────────────────
-        function filterFiles(query) {
-            const tree = document.getElementById('directoryTree');
-            const noMatch = document.getElementById('filterFilesNoMatch');
-            const q = query.trim().toLowerCase();
-
-            // Reset all file visibility first
-            tree.querySelectorAll('.directory-item.file').forEach(file => {
-                file.style.display = '';
-            });
-
-            if (!q) {
-                noMatch.style.display = 'none';
-                // Restore folder visibility based on project filter
-                const projectQ = document.getElementById('projectFilter').value;
-                filterProjects(projectQ);
-                return;
-            }
-
-            // Show/hide individual files
-            let totalVisible = 0;
-            tree.querySelectorAll('.directory-item.file').forEach(file => {
-                const name = file.dataset.fileName || '';
-                if (name.includes(q)) {
-                    file.style.display = '';
-                    totalVisible++;
-                } else {
-                    file.style.display = 'none';
-                }
-            });
-
-            // Show/hide folders based on whether they have visible files
-            tree.querySelectorAll(':scope > .directory-item.folder').forEach(folder => {
-                const content = folder.nextElementSibling;
-                if (!content || !content.classList.contains('folder-content')) return;
-                const visibleFiles = content.querySelectorAll('.directory-item.file:not([style*="display: none"])');
-                if (visibleFiles.length > 0) {
-                    folder.style.display = '';
-                    content.style.display = '';
-                } else {
-                    folder.style.display = 'none';
-                    content.style.display = 'none';
-                }
-            });
-
-            // Handle root-level files (not in folders)
-            noMatch.style.display = (totalVisible === 0) ? 'block' : 'none';
-        }
-
         // ── Show / Hide Hidden Projects ─────────────────────────────────
         let showingHidden = false;
 
@@ -1247,8 +1184,6 @@ if (file_exists($settingsFile)) {
             // Re-apply any active filter
             const filterVal = document.getElementById('projectFilter').value;
             if (filterVal) filterProjects(filterVal);
-            const fileFilterVal = document.getElementById('fileFilter').value;
-            if (fileFilterVal) filterFiles(fileFilterVal);
         }
 
         function hideProject(folderName) {
