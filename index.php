@@ -872,7 +872,7 @@ if (file_exists($settingsFile)) {
                 </div>
 
                 <div class="form-group">
-                    <label for="selector">DIV / CSS Class Selector (Optional)</label>
+                    <label for="selector">CSS Selector (Optional)</label>
                     <input
                         type="text"
                         name="selector"
@@ -880,8 +880,8 @@ if (file_exists($settingsFile)) {
                         placeholder="your_right_contents"
                     />
                     <div class="help-text">
-                        Enter class name without dot (e.g., "your_right_contents").
-                        If empty, full &lt;body&gt; content will be extracted.
+                        Enter a tag name, class name, or ID (e.g., "main", "your_right_contents", "#content").
+                        Works with any HTML tag (div, main, section, article, etc.). If empty, full &lt;body&gt; content will be extracted.
                     </div>
                 </div>
 

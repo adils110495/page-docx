@@ -218,11 +218,29 @@ function extractContent($html, $selector = null, $skipSelectors = '') {
     $contentHtml = '';
 
     if ($selector && !empty(trim($selector))) {
-        // Try to find div with specific class
-        $nodes = $xpath->query("//div[contains(concat(' ', normalize-space(@class), ' '), ' $selector ')]");
+        $selector = trim($selector);
 
-        if ($nodes->length > 0) {
-            // Get inner HTML of the first matching div
+        if (strpos($selector, '#') === 0) {
+            // ID selector (e.g., #content)
+            $id = substr($selector, 1);
+            $nodes = $xpath->query("//*[@id='$id']");
+        } elseif (strpos($selector, '.') === 0) {
+            // Class selector with dot (e.g., .main-content)
+            $class = substr($selector, 1);
+            $nodes = $xpath->query("//*[contains(concat(' ', normalize-space(@class), ' '), ' $class ')]");
+        } else {
+            // Could be a tag name (e.g., main, article) or a plain class name
+            $tagNodes = $xpath->query("//$selector");
+            if ($tagNodes !== false && $tagNodes->length > 0) {
+                // Matched as a tag name
+                $nodes = $tagNodes;
+            } else {
+                // Fall back to class name match on any element
+                $nodes = $xpath->query("//*[contains(concat(' ', normalize-space(@class), ' '), ' $selector ')]");
+            }
+        }
+
+        if ($nodes !== false && $nodes->length > 0) {
             $node = $nodes->item(0);
             $contentHtml = getInnerHtml($node);
         } else {
@@ -299,11 +317,11 @@ function processNodeForDocx($section, $node, $textRun = null, $depth = 0) {
             // Only add text if it's not just whitespace
             if (!empty($trimmedValue)) {
                 if ($textRun) {
-                    $textRun->addText($nodeValue);
+                    $textRun->addText(sanitizeTextForDocx($nodeValue));
                 } else {
                     // Direct text without parent formatting element - only add if substantial
                     if (strlen($trimmedValue) > 2) {
-                        $section->addText($trimmedValue, ['size' => 11, 'name' => 'Arial']);
+                        $section->addText(sanitizeTextForDocx($trimmedValue), ['size' => 11, 'name' => 'Arial']);
                     }
                 }
             }
@@ -415,7 +433,7 @@ function processNodeForDocx($section, $node, $textRun = null, $depth = 0) {
                 case 'b':
                     $text = getTextContent($child);
                     if (!empty($text) && $textRun) {
-                        $textRun->addText($text, ['bold' => true]);
+                        $textRun->addText(sanitizeTextForDocx($text), ['bold' => true]);
                     }
                     break;
 
@@ -423,7 +441,7 @@ function processNodeForDocx($section, $node, $textRun = null, $depth = 0) {
                 case 'i':
                     $text = getTextContent($child);
                     if (!empty($text) && $textRun) {
-                        $textRun->addText($text, ['italic' => true]);
+                        $textRun->addText(sanitizeTextForDocx($text), ['italic' => true]);
                     }
                     break;
 
@@ -707,17 +725,25 @@ function processTableRow($table, $rowNode, $isHeader = false) {
 function sanitizeTextForDocx($text) {
     // Decode HTML entities first
     $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-    // Remove emojis and special unicode characters (surrogate pairs)
+    // Remove emojis and characters above U+FFFD (not valid XML 1.0)
     $text = preg_replace('/[\x{10000}-\x{10FFFF}]/u', '', $text);
+    // Remove U+FFFE and U+FFFF which are invalid in XML 1.0
+    $text = preg_replace('/[\x{FFFE}\x{FFFF}]/u', '', $text);
+    // Remove C1 control characters (U+0080-U+009F) — valid UTF-8 but invalid XML 1.0
+    // These can appear after html_entity_decode on Windows-1252 pages (e.g. &#x80;)
+    $text = preg_replace('/[\x{0080}-\x{009F}]/u', '', $text);
     // Normalize Cyrillic lookalike characters to Latin equivalents
     // This fixes issues where Cyrillic characters are mixed with Latin text
     $text = normalizeCyrillicToLatin($text);
     // Replace multiple whitespace with single space
     $text = preg_replace('/\s+/', ' ', $text);
+    // Remove angle brackets — these cause "Illegal qualified name character" in DOCX XML
+    // when html_entity_decode converts &lt;/&gt; back to raw < > before they reach PHPWord
+    $text = str_replace(['<', '>'], ['', ''], $text);
     // Remove or replace problematic characters for XML
     // Replace ampersand with "and" to avoid XML entity issues
     $text = str_replace('&', 'and', $text);
-    // Remove other control characters that might cause issues
+    // Remove C0 control characters that are invalid in XML 1.0
     $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
     return trim($text);
 }
@@ -807,7 +833,7 @@ function containsBrTag($node) {
  * Add text with line breaks to section using TextRun
  */
 function addTextWithLineBreaks($section, $text, $fontStyle = [], $paragraphStyle = []) {
-    $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $text = sanitizeTextForDocx($text);
     $lines = explode("\n", $text);
 
     if (count($lines) === 1) {
@@ -903,18 +929,14 @@ function addElementContent($section, $node, $fontStyle = [], $paragraphStyle = [
             // No <br> tags, use simple text extraction
             $text = getTextContent($node);
             if (!empty($text)) {
-                $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-                $section->addText($text, $fontStyle, $paragraphStyle);
+                $section->addText(sanitizeTextForDocx($text), $fontStyle, $paragraphStyle);
             }
         }
     } catch (Exception $e) {
         // Fallback to simple text if TextRun fails
         $text = getTextContent($node);
         if (!empty($text)) {
-            $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            // Replace newlines with spaces for fallback
-            $text = preg_replace('/\s+/', ' ', $text);
-            $section->addText($text, $fontStyle, $paragraphStyle);
+            $section->addText(sanitizeTextForDocx($text), $fontStyle, $paragraphStyle);
         }
     }
 }
@@ -1070,9 +1092,6 @@ function cleanHtmlForDocx($html) {
     $html = preg_replace('/<(\w+)[^>]*>\s*<\/\1>/', '', $html);
     // Restore preserved headings (they'll be extracted later even if empty)
     $html = str_replace('__PRESERVE__', '', $html);
-
-    // Convert common HTML entities
-    $html = html_entity_decode($html, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
     // Trim whitespace
     $html = trim($html);
