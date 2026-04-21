@@ -8,8 +8,8 @@ use PhpOffice\PhpWord\Shared\Html;
 
 /**
  * Generate slug from URL for filename
- * Uses only the last segment of the URL path
- * Example: /abc/xyz/efg -> efg
+ * Uses the full URL path joined with dashes
+ * Example: /es/compensation/wizz-air-malta/ -> es-compensation-wizz-air-malta
  */
 function generateSlug($url) {
     $parsed = parse_url($url);
@@ -18,20 +18,13 @@ function generateSlug($url) {
     // Remove trailing slash
     $path = rtrim($path, '/');
 
-    // Get the last segment of the path
     if (!empty($path)) {
-        $segments = explode('/', $path);
-        $lastSegment = end($segments);
+        // Split path into segments and filter out empty ones
+        $segments = array_filter(explode('/', $path), function($s) { return $s !== ''; });
 
-        // If last segment is empty or just a slash, use the previous segment
-        if (empty($lastSegment)) {
-            array_pop($segments);
-            $lastSegment = end($segments);
-        }
-
-        // If we have a valid last segment, use it
-        if (!empty($lastSegment)) {
-            $slug = $lastSegment;
+        if (!empty($segments)) {
+            // Join all path segments with dash
+            $slug = implode('-', $segments);
         } else {
             // Fallback to hostname if no path segments
             $slug = isset($parsed['host']) ? $parsed['host'] : 'document';
